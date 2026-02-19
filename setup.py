@@ -8,11 +8,12 @@ setup(
     packages=find_packages(),
     python_requires=">=3.10",
     install_requires=[
-        "sqlalchemy>=2.0.0",
+        "sqlalchemy>=2.0.0,<3.0.0",
         "PyJWT>=2.8.0",
         "bcrypt>=4.1.0",
         "pydantic>=2.5.0",
         "python-dotenv>=1.0.0",
+        "psycopg2-binary>=2.9.11",
     ],
     extras_require={
         "dev": [
@@ -32,7 +33,7 @@ setup(
             "flask>=3.0.0",
         ],
         "psycopg": [
-            "psycopg[binary]>=3.1.0",
+            "psycopg2-binary>=2.9.11",
         ],
     },
     author="AuthLib Contributors",
