@@ -148,6 +148,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Support
 
 - **Documentation**: https://authlib.readthedocs.io
-- **GitHub**: https://github.com/yourusername/authlib
-- **Issues**: https://github.com/yourusername/authlib/issues
-- **Email**: support@authlib.dev
+- **GitHub**: https://github.com/MrunalHedau4102/authlib-python
+- **Issues**: https://github.com/MrunalHedau4102/authlib-python/issues
+- **Email**: mrunalh1234@gmail.com

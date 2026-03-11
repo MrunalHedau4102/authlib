@@ -67,11 +67,11 @@ psycopg = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/authlib/authlib-python"
-"Documentation" = "https://github.com/authlib/authlib-python#readme"
-"Repository" = "https://github.com/authlib/authlib-python.git"
-"Issues" = "https://github.com/authlib/authlib-python/issues"
-"Changelog" = "https://github.com/authlib/authlib-python/blob/main/CHANGELOG.md"
+"Homepage" = "https://github.com/MrunalHedau4102/authlib-python"
+"Documentation" = "https://github.com/MrunalHedau4102/authlib-python#readme"
+"Repository" = "https://github.com/MrunalHedau4102/authlib-python.git"
+"Issues" = "https://github.com/MrunalHedau4102/authlib-python/issues"
+"Changelog" = "https://github.com/MrunalHedau4102/authlib-python/blob/main/CHANGELOG.md"
 "PyPI" = "https://pypi.org/project/authlib/"
 
 [tool.black]

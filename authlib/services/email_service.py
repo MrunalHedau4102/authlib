@@ -77,7 +77,9 @@ class EmailService:
         except smtplib.SMTPException as e:
             raise EmailSendError(f"Failed to send email: {str(e)}") from e
         except Exception as e:
-            raise EmailSendError(f"Unexpected error while sending email: {str(e)}") from e
+            raise EmailSendError(
+                f"Unexpected error while sending email: {str(e)}"
+            ) from e
 
     def send_password_reset_email(
         self,

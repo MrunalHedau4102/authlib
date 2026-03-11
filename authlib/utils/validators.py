@@ -8,9 +8,7 @@ class EmailValidator:
     """Validates email addresses."""
 
     # RFC 5322 simplified email regex
-    EMAIL_PATTERN = re.compile(
-        r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    )
+    EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
     @classmethod
     def validate(cls, email: str) -> bool:
@@ -84,22 +82,17 @@ class PasswordValidator:
                 f"Password must be at least {cls.MIN_LENGTH} characters long"
             )
 
-        if cls.REQUIRE_UPPERCASE and not re.search(r'[A-Z]', password):
-            raise ValidationError(
-                "Password must contain at least one uppercase letter"
-            )
+        if cls.REQUIRE_UPPERCASE and not re.search(r"[A-Z]", password):
+            raise ValidationError("Password must contain at least one uppercase letter")
 
-        if cls.REQUIRE_LOWERCASE and not re.search(r'[a-z]', password):
-            raise ValidationError(
-                "Password must contain at least one lowercase letter"
-            )
+        if cls.REQUIRE_LOWERCASE and not re.search(r"[a-z]", password):
+            raise ValidationError("Password must contain at least one lowercase letter")
 
-        if cls.REQUIRE_DIGITS and not re.search(r'\d', password):
+        if cls.REQUIRE_DIGITS and not re.search(r"\d", password):
             raise ValidationError("Password must contain at least one digit")
 
         if cls.REQUIRE_SPECIAL and not re.search(
-            r'[!@#$%^&*()_+\-=\[\]{};:\'",.<>?/\\|`~]',
-            password
+            r'[!@#$%^&*()_+\-=\[\]{};:\'",.<>?/\\|`~]', password
         ):
             raise ValidationError(
                 "Password must contain at least one special character"
@@ -134,24 +127,22 @@ class PasswordValidator:
         if len(password) >= cls.MIN_LENGTH:
             score += 20
         else:
-            feedback["issues"].append(
-                f"At least {cls.MIN_LENGTH} characters required"
-            )
+            feedback["issues"].append(f"At least {cls.MIN_LENGTH} characters required")
 
         # Uppercase check
-        if re.search(r'[A-Z]', password):
+        if re.search(r"[A-Z]", password):
             score += 20
         else:
             feedback["issues"].append("Add uppercase letters")
 
         # Lowercase check
-        if re.search(r'[a-z]', password):
+        if re.search(r"[a-z]", password):
             score += 20
         else:
             feedback["issues"].append("Add lowercase letters")
 
         # Digits check
-        if re.search(r'\d', password):
+        if re.search(r"\d", password):
             score += 20
         else:
             feedback["issues"].append("Add digits")

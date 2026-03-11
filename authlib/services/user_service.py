@@ -59,9 +59,7 @@ class UserService:
         # Check if user already exists
         existing_user = self.get_user_by_email(email)
         if existing_user:
-            raise UserAlreadyExists(
-                f"User with email {email} already exists"
-            )
+            raise UserAlreadyExists(f"User with email {email} already exists")
 
         # Hash password
         password_hash = self.password_handler.hash_password(password)

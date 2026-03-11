@@ -15,7 +15,9 @@ class TokenBlacklist(Base):
     jti = Column(String(500), unique=True, nullable=False, index=True)  # JWT ID
     user_id = Column(Integer, nullable=False, index=True)
     token_type = Column(String(50), nullable=False)  # 'access', 'refresh', etc.
-    reason = Column(String(255), nullable=True)  # Reason for revocation (logout, password reset, etc.)
+    reason = Column(
+        String(255), nullable=True
+    )  # Reason for revocation (logout, password reset, etc.)
     revoked_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

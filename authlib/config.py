@@ -13,8 +13,7 @@ class Config:
 
     # JWT Configuration
     JWT_SECRET_KEY: str = os.getenv(
-        "JWT_SECRET_KEY",
-        "your-secret-key-change-this-in-production"
+        "JWT_SECRET_KEY", "your-secret-key-change-this-in-production"
     )
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     JWT_ACCESS_TOKEN_EXPIRY_MINUTES: int = int(
@@ -26,8 +25,7 @@ class Config:
 
     # Database Configuration
     DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql://user:password@localhost:5432/authlib_db"
+        "DATABASE_URL", "postgresql://user:password@localhost:5432/authlib_db"
     )
 
     # Email Configuration
@@ -68,18 +66,21 @@ class Config:
 
 class DevelopmentConfig(Config):
     """Development configuration."""
+
     DEBUG = True
     APP_ENV = "development"
 
 
 class ProductionConfig(Config):
     """Production configuration."""
+
     DEBUG = False
     APP_ENV = "production"
 
 
 class TestConfig(Config):
     """Test configuration."""
+
     DATABASE_URL = "postgresql://user:password@localhost:5432/authlib_test_db"
     JWT_SECRET_KEY = "test-secret-key"
     SMTP_USERNAME = "test@example.com"

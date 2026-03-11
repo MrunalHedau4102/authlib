@@ -34,14 +34,14 @@ class PasswordHandler:
             raise ValueError("Password must be a non-empty string")
 
         # Encode password to bytes
-        password_bytes = password.encode('utf-8')
+        password_bytes = password.encode("utf-8")
 
         # Generate salt and hash
         salt = bcrypt.gensalt(rounds=self.log_rounds)
         hashed = bcrypt.hashpw(password_bytes, salt)
 
         # Return as string
-        return hashed.decode('utf-8')
+        return hashed.decode("utf-8")
 
     def verify_password(self, password: str, hashed_password: str) -> bool:
         """
@@ -65,8 +65,8 @@ class PasswordHandler:
 
         try:
             # Encode inputs to bytes
-            password_bytes = password.encode('utf-8')
-            hashed_bytes = hashed_password.encode('utf-8')
+            password_bytes = password.encode("utf-8")
+            hashed_bytes = hashed_password.encode("utf-8")
 
             # Verify using bcrypt
             return bcrypt.checkpw(password_bytes, hashed_bytes)
@@ -95,7 +95,7 @@ class PasswordHandler:
 
             # Extract rounds from bcrypt hash (format: $2b$XX$...)
             # Hash format: $2b$12$...
-            hash_rounds = int(hashed_password.split('$')[2])
+            hash_rounds = int(hashed_password.split("$")[2])
             return hash_rounds < current_rounds
         except (IndexError, ValueError):
             return True

@@ -230,7 +230,9 @@ class AuthService:
             "expires_in": self.config.PASSWORD_RESET_TOKEN_EXPIRY_MINUTES * 60,
         }
 
-    def confirm_password_reset(self, reset_token: str, new_password: str) -> Dict[str, any]:
+    def confirm_password_reset(
+        self, reset_token: str, new_password: str
+    ) -> Dict[str, any]:
         """
         Reset user password using reset token.
 
