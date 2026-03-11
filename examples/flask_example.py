@@ -20,6 +20,8 @@ from authlib.utils.exceptions import (
     InvalidToken,
     UserAlreadyExists,
     ValidationError,
+    InvalidOTP,
+    TwoFactorRequired,
 )
 
 
@@ -77,7 +79,7 @@ def handle_auth_exception(f):
             return jsonify({"error": e.message}), 409
         except ValidationError as e:
             return jsonify({"error": e.message}), 400
-        except (UserNotFound, InvalidCredentials) as e:
+        except (UserNotFound, InvalidCredentials, InvalidOTP, TwoFactorRequired) as e:
             return jsonify({"error": e.message}), 401
         except InvalidToken as e:
             return jsonify({"error": e.message}), 401
@@ -144,6 +146,9 @@ def login():
     """
     Authenticate user and return tokens.
 
+    If user has 2FA enabled, returns otp_verification_token instead of JWT tokens.
+    Use POST /api/auth/login/verify-otp to complete 2FA login.
+
     Request JSON:
     {
         "email": "user@example.com",
@@ -151,7 +156,7 @@ def login():
     }
 
     Returns:
-        JSON with user data and tokens
+        JSON with user data and tokens, or 2FA verification token
     """
     data = request.get_json()
 
@@ -169,6 +174,11 @@ def login():
     try:
         auth_service = AuthService(session)
         result = auth_service.login(email=email, password=password)
+        
+        # Check if 2FA is required
+        if result.get("requires_2fa"):
+            return jsonify(result), 401
+        
         return jsonify(result), 200
     finally:
         session.close()
@@ -310,6 +320,156 @@ def get_current_user_profile(current_user=None):
             return jsonify({"error": "User not found"}), 404
 
         return jsonify(user.to_dict()), 200
+    finally:
+        session.close()
+
+
+# ============================================================================
+# 2FA (Two-Factor Authentication) Routes
+# ============================================================================
+
+@app.route("/api/auth/2fa/setup", methods=["GET"])
+@require_auth
+@handle_auth_exception
+def setup_2fa(current_user=None):
+    """
+    Generate 2FA secret and provisioning URI.
+
+    User must scan the provisioning URI with an authenticator app,
+    then call POST /api/auth/2fa/verify-setup with the OTP code.
+
+    Returns:
+        JSON with secret and provisioning_uri
+    """
+    user_id = current_user["user_id"]
+    session = db.create_session()
+
+    try:
+        auth_service = AuthService(session)
+        result = auth_service.setup_2fa(user_id)
+        return jsonify(result), 200
+    finally:
+        session.close()
+
+
+@app.route("/api/auth/2fa/verify-setup", methods=["POST"])
+@require_auth
+@handle_auth_exception
+def verify_2fa_setup(current_user=None):
+    """
+    Verify OTP code and enable 2FA.
+
+    Request JSON:
+    {
+        "secret": "CTYRZG...",  (from setup_2fa response)
+        "otp_code": "123456"     (6-digit code from authenticator app)
+    }
+
+    Returns:
+        Success message
+    """
+    data = request.get_json()
+
+    if not data:
+        return jsonify({"error": "Request body is required"}), 400
+
+    secret = data.get("secret")
+    otp_code = data.get("otp_code")
+
+    if not secret or not otp_code:
+        return jsonify({"error": "secret and otp_code are required"}), 400
+
+    user_id = current_user["user_id"]
+    session = db.create_session()
+
+    try:
+        auth_service = AuthService(session)
+        result = auth_service.verify_2fa_setup_with_secret(
+            user_id=user_id,
+            secret=secret,
+            otp_code=otp_code,
+        )
+        return jsonify({"message": "2FA enabled successfully"}), 200
+    finally:
+        session.close()
+
+
+@app.route("/api/auth/login/verify-otp", methods=["POST"])
+@handle_auth_exception
+def login_verify_otp():
+    """
+    Complete login with 2FA by verifying OTP code.
+
+    Call this endpoint after login returns requires_2fa: True.
+
+    Request JSON:
+    {
+        "otp_verification_token": "eyJhbGc...",  (from login response)
+        "otp_code": "123456"                      (6-digit code from authenticator app)
+    }
+
+    Returns:
+        JSON with user data and JWT tokens
+    """
+    data = request.get_json()
+
+    if not data:
+        return jsonify({"error": "Request body is required"}), 400
+
+    otp_verification_token = data.get("otp_verification_token")
+    otp_code = data.get("otp_code")
+
+    if not otp_verification_token or not otp_code:
+        return jsonify({"error": "otp_verification_token and otp_code are required"}), 400
+
+    session = db.create_session()
+
+    try:
+        auth_service = AuthService(session)
+        result = auth_service.complete_2fa_login(
+            otp_verification_token=otp_verification_token,
+            otp_code=otp_code,
+        )
+        return jsonify(result), 200
+    finally:
+        session.close()
+
+
+@app.route("/api/auth/2fa/disable", methods=["POST"])
+@require_auth
+@handle_auth_exception
+def disable_2fa(current_user=None):
+    """
+    Disable 2FA for user.
+
+    Request JSON:
+    {
+        "password": "UserPassword123!",  (required)
+        "otp_code": "123456"             (optional, recommended if 2FA is currently enabled)
+    }
+
+    Returns:
+        Success message
+    """
+    data = request.get_json()
+
+    if not data or not data.get("password"):
+        return jsonify({"error": "password is required"}), 400
+
+    user_id = current_user["user_id"]
+    password = data.get("password")
+    otp_code = data.get("otp_code")
+
+    session = db.create_session()
+
+    try:
+        auth_service = AuthService(session)
+        result = auth_service.disable_2fa(
+            user_id=user_id,
+            user_password=password,
+            otp_code=otp_code,
+        )
+        return jsonify({"message": "2FA disabled successfully"}), 200
     finally:
         session.close()
 

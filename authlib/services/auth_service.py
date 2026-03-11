@@ -17,8 +17,11 @@ from authlib.utils.exceptions import (
     UserAlreadyExists,
     ValidationError,
     DatabaseError,
+    InvalidOTP,
+    TwoFactorRequired,
 )
 from authlib.config import Config
+import pyotp
 
 
 class AuthService:
@@ -93,7 +96,7 @@ class AuthService:
             password: User password
 
         Returns:
-            Dictionary with user and tokens
+            Dictionary with user and tokens, or 2FA verification token if 2FA enabled
 
         Raises:
             UserNotFound: If user doesn't exist
@@ -119,6 +122,19 @@ class AuthService:
 
         # Update last login
         user.update_last_login(self.session)
+
+        # Check if 2FA is enabled
+        if user.is_two_factor_enabled:
+            # Return OTP verification token instead of access tokens
+            otp_verification_token = self.jwt_handler.create_otp_verification_token(
+                user_id=user.id,
+                email=user.email,
+            )
+            return {
+                "requires_2fa": True,
+                "otp_verification_token": otp_verification_token,
+                "user_id": user.id,
+            }
 
         # Generate tokens
         tokens = self._generate_tokens(user)
@@ -279,6 +295,230 @@ class AuthService:
             "refresh_token": tokens["refresh_token"],
             "token_type": "Bearer",
         }
+
+    def setup_2fa(self, user_id: int) -> Dict[str, str]:
+        """
+        Generate a new 2FA secret and provisioning URI.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            Dictionary with provisioning_uri and secret
+
+        Raises:
+            UserNotFound: If user doesn't exist
+        """
+        user = self.user_service.get_user_by_id(user_id)
+        if not user:
+            raise UserNotFound(f"User with ID {user_id} not found")
+
+        # Generate a new secret (not yet enabled)
+        secret = pyotp.random_base32()
+        
+        # Create temporary TOTP object to generate URI
+        totp = pyotp.TOTP(secret)
+        provisioning_uri = totp.provisioning_uri(
+            name=user.email,
+            issuer_name="AuthLib"
+        )
+
+        # Return secret and URI for user to verify
+        # Secret is NOT stored yet - only after verify_2fa_setup is called
+        return {
+            "secret": secret,
+            "provisioning_uri": provisioning_uri,
+        }
+
+    def verify_2fa_setup_with_secret(self, user_id: int, secret: str, otp_code: str) -> bool:
+        """
+        Verify an OTP code during 2FA setup with provided secret.
+
+        Args:
+            user_id: User ID
+            secret: Base32-encoded secret from setup_2fa
+            otp_code: OTP code from authenticator app
+
+        Returns:
+            True if setup successful
+
+        Raises:
+            UserNotFound: If user doesn't exist
+            ValidationError: If OTP code is invalid format
+            InvalidOTP: If OTP code is invalid
+            DatabaseError: If database operation fails
+        """
+        user = self.user_service.get_user_by_id(user_id)
+        if not user:
+            raise UserNotFound(f"User with ID {user_id} not found")
+
+        # Validate OTP code format
+        if not otp_code or not isinstance(otp_code, str):
+            raise ValidationError("OTP code must be a non-empty string")
+
+        if len(otp_code) != 6 or not otp_code.isdigit():
+            raise ValidationError("OTP code must be 6 digits")
+
+        # Validate secret format
+        if not secret or not isinstance(secret, str):
+            raise ValidationError("Secret must be a non-empty string")
+
+        try:
+            # Create TOTP validator with the secret
+            totp = pyotp.TOTP(secret)
+            
+            # Verify OTP code (with 1-step tolerance for clock skew)
+            if not totp.verify(otp_code, valid_window=1):
+                raise InvalidOTP("OTP code is invalid or expired")
+
+            # Enable 2FA on user
+            user.enable_2fa(secret)
+            self.session.commit()
+
+            return True
+
+        except InvalidOTP:
+            raise
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise DatabaseError(f"Failed to enable 2FA: {str(e)}") from e
+
+    def verify_otp(self, user_id: int, otp_code: str) -> bool:
+        """
+        Verify an OTP code during login.
+
+        Args:
+            user_id: User ID
+            otp_code: OTP code from authenticator app
+
+        Returns:
+            True if OTP is valid
+
+        Raises:
+            UserNotFound: If user doesn't exist
+            ValidationError: If OTP code is invalid format
+            InvalidOTP: If OTP code is invalid
+        """
+        user = self.user_service.get_user_by_id(user_id)
+        if not user:
+            raise UserNotFound(f"User with ID {user_id} not found")
+
+        if not user.is_two_factor_enabled:
+            raise ValidationError("User does not have 2FA enabled")
+
+        if not user.two_factor_secret:
+            raise ValidationError("User 2FA secret is not set")
+
+        # Validate OTP code format
+        if not otp_code or not isinstance(otp_code, str):
+            raise ValidationError("OTP code must be a non-empty string")
+
+        if len(otp_code) != 6 or not otp_code.isdigit():
+            raise ValidationError("OTP code must be 6 digits")
+
+        try:
+            # Create TOTP validator with user's secret
+            totp = pyotp.TOTP(user.two_factor_secret)
+            
+            # Verify OTP code (with 1-step tolerance for clock skew)
+            if not totp.verify(otp_code, valid_window=1):
+                raise InvalidOTP("OTP code is invalid or expired")
+
+            return True
+
+        except InvalidOTP:
+            raise
+
+    def complete_2fa_login(self, otp_verification_token: str, otp_code: str) -> Dict[str, any]:
+        """
+        Complete login by verifying 2FA code and issuing JWT tokens.
+
+        Args:
+            otp_verification_token: OTP verification token from login
+            otp_code: OTP code from authenticator app
+
+        Returns:
+            Dictionary with user and tokens
+
+        Raises:
+            InvalidToken: If verification token is invalid
+            UserNotFound: If user doesn't exist
+            InvalidOTP: If OTP code is invalid
+        """
+        # Verify the OTP verification token
+        payload = self.jwt_handler.verify_otp_verification_token(otp_verification_token)
+        user_id = payload.get("user_id")
+
+        # Get user
+        user = self.user_service.get_user_by_id(user_id)
+        if not user:
+            raise UserNotFound(f"User with ID {user_id} not found")
+
+        # Verify OTP code
+        self.verify_otp(user_id, otp_code)
+
+        # Generate tokens
+        tokens = self._generate_tokens(user)
+
+        return {
+            "user": user.to_dict(),
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens["refresh_token"],
+            "token_type": "Bearer",
+        }
+
+    def disable_2fa(
+        self, 
+        user_id: int, 
+        user_password: str, 
+        otp_code: Optional[str] = None
+    ) -> bool:
+        """
+        Disable 2FA for a user.
+
+        Args:
+            user_id: User ID
+            user_password: User password (required for security)
+            otp_code: Current OTP code (optional, for extra verification)
+
+        Returns:
+            True if 2FA disabled successfully
+
+        Raises:
+            UserNotFound: If user doesn't exist
+            InvalidCredentials: If password is wrong
+            InvalidOTP: If OTP code is provided and invalid
+            ValidationError: If user doesn't have 2FA enabled
+            DatabaseError: If database operation fails
+        """
+        user = self.user_service.get_user_by_id(user_id)
+        if not user:
+            raise UserNotFound(f"User with ID {user_id} not found")
+
+        if not user.is_two_factor_enabled:
+            raise ValidationError("User does not have 2FA enabled")
+
+        # Verify password
+        if not self.password_handler.verify_password(user_password, user.password_hash):
+            raise InvalidCredentials("Invalid password")
+
+        # Verify OTP code if 2FA is currently enabled
+        if otp_code:
+            if len(otp_code) != 6 or not otp_code.isdigit():
+                raise ValidationError("OTP code must be 6 digits")
+            
+            self.verify_otp(user_id, otp_code)
+
+        try:
+            # Disable 2FA
+            user.disable_2fa()
+            self.session.commit()
+
+            return True
+
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise DatabaseError(f"Failed to disable 2FA: {str(e)}") from e
 
     def verify_token(self, token: str) -> Dict[str, any]:
         """

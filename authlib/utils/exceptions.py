@@ -64,3 +64,17 @@ class EmailSendError(AuthException):
 
     def __init__(self, message: str = "Failed to send email") -> None:
         super().__init__(message, status_code=500)
+
+
+class InvalidOTP(AuthException):
+    """Raised when OTP code is invalid or expired."""
+
+    def __init__(self, message: str = "Invalid or expired OTP code") -> None:
+        super().__init__(message, status_code=401)
+
+
+class TwoFactorRequired(AuthException):
+    """Raised when two-factor authentication is required."""
+
+    def __init__(self, message: str = "Two-factor authentication required") -> None:
+        super().__init__(message, status_code=401)

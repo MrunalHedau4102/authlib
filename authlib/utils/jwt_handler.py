@@ -169,6 +169,75 @@ class JWTHandler:
 
         return token
 
+    def create_otp_verification_token(
+        self,
+        user_id: int,
+        email: str,
+        additional_claims: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Create an OTP verification token (temporary token for 2FA flow).
+
+        Args:
+            user_id: User ID for the token
+            email: User email for the token
+            additional_claims: Optional additional claims to include
+
+        Returns:
+            Encoded JWT token string
+
+        Raises:
+            ValueError: If user_id or email is invalid
+        """
+        if not user_id or not isinstance(user_id, int):
+            raise ValueError("user_id must be a positive integer")
+
+        if not email or not isinstance(email, str):
+            raise ValueError("email must be a non-empty string")
+
+        now = datetime.now(timezone.utc)
+        # OTP verification tokens expire in 5 minutes
+        expiry = now + timedelta(minutes=5)
+
+        payload = {
+            "user_id": user_id,
+            "email": email,
+            "token_type": "otp_verification",
+            "iat": now,
+            "exp": expiry,
+        }
+
+        if additional_claims:
+            payload.update(additional_claims)
+
+        token = jwt.encode(
+            payload,
+            self.secret_key,
+            algorithm=self.algorithm,
+        )
+
+        return token
+
+    def verify_otp_verification_token(self, token: str) -> Dict[str, Any]:
+        """
+        Verify an OTP verification token and check token type.
+
+        Args:
+            token: JWT token to verify
+
+        Returns:
+            Decoded token payload
+
+        Raises:
+            InvalidToken: If token is invalid, expired, or not an OTP verification token
+        """
+        payload = self.verify_token(token)
+
+        if payload.get("token_type") != "otp_verification":
+            raise InvalidToken("Token is not an OTP verification token")
+
+        return payload
+
     def verify_token(self, token: str) -> Dict[str, Any]:
         """
         Verify and decode a JWT token.

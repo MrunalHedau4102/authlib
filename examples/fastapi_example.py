@@ -21,6 +21,8 @@ from authlib.utils.exceptions import (
     InvalidToken,
     UserAlreadyExists,
     ValidationError,
+    InvalidOTP,
+    TwoFactorRequired,
 )
 
 
@@ -81,6 +83,41 @@ class AuthResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "Bearer"
+
+
+# ============================================================================
+# 2FA Pydantic Models
+# ============================================================================
+
+class Setup2FAResponse(BaseModel):
+    """2FA setup response."""
+    secret: str
+    provisioning_uri: str
+
+
+class Verify2FASetupRequest(BaseModel):
+    """Verify 2FA setup request."""
+    secret: str
+    otp_code: str
+
+
+class LoginWith2FAResponse(BaseModel):
+    """Login response when 2FA is required."""
+    requires_2fa: bool = True
+    otp_verification_token: str
+    user_id: int
+
+
+class VerifyOTPLoginRequest(BaseModel):
+    """Verify OTP during login request."""
+    otp_verification_token: str
+    otp_code: str
+
+
+class Disable2FARequest(BaseModel):
+    """Disable 2FA request."""
+    password: str
+    otp_code: str = None
 
 
 # ============================================================================
@@ -180,7 +217,7 @@ def signup(
         session.close()
 
 
-@app.post("/api/auth/login", response_model=AuthResponse)
+@app.post("/api/auth/login")
 def login(
     request: LoginRequest,
     session: Session = Depends(get_db_session),
@@ -188,12 +225,15 @@ def login(
     """
     Authenticate user and return tokens.
     
+    If user has 2FA enabled, returns LoginWith2FAResponse with otp_verification_token.
+    Use POST /api/auth/login/verify-otp to complete 2FA login.
+    
     Args:
         request: Login request with email and password
         session: Database session
         
     Returns:
-        AuthResponse with user data and tokens
+        AuthResponse with user data and tokens, or LoginWith2FAResponse if 2FA required
     """
     try:
         auth_service = AuthService(session)
@@ -201,6 +241,15 @@ def login(
             email=request.email,
             password=request.password,
         )
+        
+        # Check if 2FA is required
+        if result.get("requires_2fa"):
+            return LoginWith2FAResponse(
+                requires_2fa=True,
+                otp_verification_token=result["otp_verification_token"],
+                user_id=result["user_id"],
+            )
+        
         return result
     except (UserNotFound, InvalidCredentials) as e:
         raise HTTPException(
@@ -389,6 +438,203 @@ def get_current_user_profile(
         "is_active": current_user.get("is_active"),
         "is_verified": current_user.get("is_verified"),
     }
+
+
+# ============================================================================
+# 2FA Routes (Two-Factor Authentication)
+# ============================================================================
+
+@app.get("/api/auth/2fa/setup", response_model=Setup2FAResponse)
+def setup_2fa(
+    current_user = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Generate 2FA secret and provisioning URI.
+    
+    User must scan the provisioning URI with an authenticator app,
+    then call POST /api/auth/2fa/verify-setup with the OTP code.
+    
+    Args:
+        current_user: Current authenticated user
+        session: Database session
+        
+    Returns:
+        Setup2FAResponse with secret and provisioning_uri
+    """
+    user_id = current_user.get("user_id")
+    
+    try:
+        auth_service = AuthService(session)
+        result = auth_service.setup_2fa(user_id)
+        return result
+    except UserNotFound as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=e.message,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
+    finally:
+        session.close()
+
+
+@app.post("/api/auth/2fa/verify-setup")
+def verify_2fa_setup(
+    request: Verify2FASetupRequest,
+    current_user = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Verify OTP code and enable 2FA.
+    
+    Args:
+        request: OTP code and secret from setup_2fa
+        current_user: Current authenticated user
+        session: Database session
+        
+    Returns:
+        Success message
+    """
+    user_id = current_user.get("user_id")
+    
+    try:
+        auth_service = AuthService(session)
+        auth_service.verify_2fa_setup_with_secret(
+            user_id=user_id,
+            secret=request.secret,
+            otp_code=request.otp_code,
+        )
+        return {"message": "2FA enabled successfully"}
+    except UserNotFound as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=e.message,
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=e.message,
+        )
+    except InvalidOTP as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=e.message,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
+    finally:
+        session.close()
+
+
+@app.post("/api/auth/login/verify-otp", response_model=AuthResponse)
+def login_verify_otp(
+    request: VerifyOTPLoginRequest,
+    session: Session = Depends(get_db_session),
+):
+    """
+    Complete login with 2FA by verifying OTP code.
+    
+    Call this endpoint after login returns requires_2fa: True.
+    
+    Args:
+        request: OTP verification token and code
+        session: Database session
+        
+    Returns:
+        AuthResponse with user data and JWT tokens
+    """
+    try:
+        auth_service = AuthService(session)
+        result = auth_service.complete_2fa_login(
+            otp_verification_token=request.otp_verification_token,
+            otp_code=request.otp_code,
+        )
+        return result
+    except InvalidToken as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=e.message,
+        )
+    except UserNotFound as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=e.message,
+        )
+    except InvalidOTP as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=e.message,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
+    finally:
+        session.close()
+
+
+@app.post("/api/auth/2fa/disable")
+def disable_2fa(
+    request: Disable2FARequest,
+    current_user = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Disable 2FA for user.
+    
+    Args:
+        request: User password and optional OTP code
+        current_user: Current authenticated user
+        session: Database session
+        
+    Returns:
+        Success message
+    """
+    user_id = current_user.get("user_id")
+    
+    try:
+        auth_service = AuthService(session)
+        auth_service.disable_2fa(
+            user_id=user_id,
+            user_password=request.password,
+            otp_code=request.otp_code,
+        )
+        return {"message": "2FA disabled successfully"}
+    except UserNotFound as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=e.message,
+        )
+    except InvalidCredentials as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=e.message,
+        )
+    except InvalidOTP as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=e.message,
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=e.message,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
+    finally:
+        session.close()
 
 
 @app.get("/api/health")
